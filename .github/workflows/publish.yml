@@ -116,6 +116,28 @@ jobs:
       - name: Verify package contents
         run: npm pack --dry-run
 
+      - name: Verify provenance repository metadata
+        shell: bash
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            const expected = `https://github.com/${process.env.GITHUB_REPOSITORY}`;
+            const normalize = (url) =>
+              String(url ?? "")
+                .replace(/^git\+/, "")
+                .replace(/\.git$/, "")
+                .replace(/\/$/, "");
+            const actual =
+              typeof pkg.repository === "string"
+                ? pkg.repository
+                : pkg.repository?.url;
+            if (normalize(actual) !== normalize(expected)) {
+              console.error(`package.json repository.url must point to ${expected} for npm provenance, got ${actual}`);
+              process.exit(1);
+            }
+          '
+
       - name: Commit version bump
         if: github.event_name == 'workflow_run'
         shell: bash

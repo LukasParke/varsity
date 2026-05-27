@@ -333,13 +333,15 @@ The package is configured for automated npm publishing from GitHub Actions using
 Repository configuration alone is not enough to enable Trusted Publishing. The npm package must have a Trusted Publisher configured with:
 
 - Provider: GitHub Actions
-- Repository: `LukeHagar/varsity` (or the actual repository slug if it changes)
+- Repository: `LukasParke/varsity`
 - Workflow file: `.github/workflows/publish.yml`
 - Environment: none, unless you later add a GitHub environment gate
 
 Once npm Trusted Publishing is configured, no `NPM_TOKEN` repository secret is required for publishing.
 
 The publish workflow uses Node.js 24 so npm includes Trusted Publishing support. npm 11.5.1 or newer is required for the OIDC publish flow.
+
+For provenance verification, `package.json` `repository.url` must point to the same GitHub repository as the workflow: `https://github.com/LukasParke/varsity`. npm may normalize that value to `git+https://github.com/LukasParke/varsity.git`; the owner and repository slug are the important parts.
 
 ### Manual Publish Workflow
 
