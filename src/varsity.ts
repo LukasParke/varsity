@@ -325,7 +325,17 @@ export const generateSpecificationSummary = async (
  * Get supported OpenAPI versions
  */
 export const getSupportedVersions = (): string[] => {
-	return ["2.0", "3.0.0", "3.0.1", "3.0.2", "3.0.3", "3.1.0"];
+	return [
+		"2.0",
+		"3.0.0",
+		"3.0.1",
+		"3.0.2",
+		"3.0.3",
+		"3.0.4",
+		"3.1.0",
+		"3.1.1",
+		"3.2.0",
+	];
 };
 
 /**
