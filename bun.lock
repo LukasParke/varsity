@@ -1,10 +1,10 @@
 {
   "lockfileVersion": 1,
+  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "varsity",
       "dependencies": {
-        "@types/node": "^24.6.1",
         "ajv": "^8.17.1",
         "ajv-formats": "^3.0.1",
         "commander": "^14.0.1",
@@ -14,8 +14,7 @@
       "devDependencies": {
         "@types/bun": "latest",
         "@types/js-yaml": "^4.0.9",
-      },
-      "peerDependencies": {
+        "@types/node": "^24.6.1",
         "typescript": "^5",
       },
     },

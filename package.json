@@ -5,28 +5,34 @@
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
+  "types": "./dist/types/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./index.ts"
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/index.js"
     },
     "./cli": {
-      "import": "./dist/cli.js",
-      "types": "./src/cli.ts"
+      "types": "./dist/types/src/cli.d.ts",
+      "import": "./dist/cli.js"
     }
   },
   "bin": {
     "varsity": "dist/cli.js"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "start": "bun run src/cli.ts",
     "dev": "bun run --watch src/cli.ts",
     "test": "bun test",
-    "build": "bun build index.ts --outdir dist --target node --format esm",
-    "build:cli": "bun build src/cli.ts --outdir dist --target node --format esm --outfile varsity",
-    "build:all": "bun run build && bun run build:cli",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build:lib": "bun build index.ts --outdir dist --target node --format esm --external ajv --external ajv-formats --external commander --external js-yaml",
+    "build:cli": "bun build src/cli.ts --outdir dist --target node --format esm --external ajv --external ajv-formats --external commander --external js-yaml",
+    "build:types": "bun run --bun tsc -p tsconfig.build.json",
+    "build": "bun run clean && bun run build:lib && bun run build:cli && bun run build:types",
     "lint": "bun run --bun tsc --noEmit",
-    "prepublishOnly": "bun run build:all"
+    "prepublishOnly": "bun run build"
   },
   "keywords": [
     "openapi",
@@ -53,21 +59,17 @@
     "url": "https://github.com/LukeHagar/varsity/issues"
   },
   "files": [
-    "index.ts",
-    "src/",
     "dist/",
     "README.md",
     "LICENSE"
   ],
   "devDependencies": {
     "@types/bun": "latest",
-    "@types/js-yaml": "^4.0.9"
-  },
-  "peerDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^24.6.1",
     "typescript": "^5"
   },
   "dependencies": {
-    "@types/node": "^24.6.1",
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1",
     "commander": "^14.0.1",

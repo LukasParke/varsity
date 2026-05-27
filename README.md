@@ -177,6 +177,68 @@ varsity analyze spec.json
 varsity analyze spec.json --json
 ```
 
+#### Partition by Tags
+
+Partition a central OpenAPI specification into one folder per tag. Each
+folder contains a root spec file plus sidecar `paths/`, `schemas/`,
+`parameters/`, `responses/`, and `request-bodies/` folders linked together
+via relative `$ref`s — the same layout used by the `test/main-api.json`
+fixture.
+
+`split` is intentionally reserved for a future conventional OpenAPI command
+that breaks one specification into reusable component files.
+
+```bash
+# Default: write JSON files to ./partition/<tag>/...
+varsity partition spec.json
+
+# Pick output directory and format
+varsity partition spec.json --output ./out --format yaml
+
+# Preview the planned file tree without writing anything
+varsity partition spec.json --dry-run
+
+# Drop operations that have no tags instead of grouping them
+varsity partition spec.json --no-include-untagged
+```
+
+Behavior:
+
+- Operations are bucketed by their `tags` array. Operations with multiple
+  tags are duplicated into every matching tag folder.
+- Operations with no `tags` are grouped into an `untagged/` folder
+  (disable with `--no-include-untagged`).
+- Only the components transitively referenced by the operations in each
+  bucket are emitted into that folder.
+- Internal `#/components/...` references and external file references are
+  both rewritten to relative file refs so each per-tag folder is
+  self-contained.
+
+Output layout (per tag):
+
+```
+<output>/<tag>/
+  openapi.{json|yaml}
+  paths/<slug>.{json|yaml}
+  schemas/<Name>.{json|yaml}
+  parameters/<Name>.{json|yaml}
+  responses/<Name>.{json|yaml}
+  request-bodies/<Name>.{json|yaml}
+```
+
+Programmatic usage:
+
+```javascript
+import { partitionSpecByTags, writePartitionPlan } from 'varsity';
+
+const plan = await partitionSpecByTags('spec.json', {
+  format: 'json',
+  includeUntagged: true,
+});
+
+writePartitionPlan(plan, './partition');
+```
+
 ## API Reference
 
 ### Core Functions
@@ -279,6 +341,15 @@ bun test --watch
 # Run specific test file
 bun test test/basic.test.ts
 ```
+
+### Publishing
+
+The package is configured to publish automatically to npm from GitHub Actions.
+
+- Push or merge to `main`.
+- After the `Test` workflow passes on `main`, the `Publish to npm` workflow automatically bumps the patch version, commits the version bump with `[skip ci]`, creates a matching `vX.Y.Z` tag, runs a clean build, verifies `npm pack --dry-run`, publishes with provenance, and creates a GitHub Release.
+- The repository must have an `NPM_TOKEN` secret with publish access for the package.
+- The workflow can also be run manually from GitHub Actions, including a dry-run mode. Manual non-dry-run publishes the current `package.json` version without auto-bumping.
 
 ## Contributing
 

@@ -5,151 +5,138 @@ on:
     workflows: ["Test"]
     types: [completed]
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Run npm publish --dry-run instead of publishing"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
 
 permissions:
-  contents: write # Needed to create tags/releases
-  packages: write # If you also publish GitHub Packages
-  id-token: write # Optional (for OIDC to cloud registries)
+  contents: write
+  id-token: write
+
+concurrency:
+  group: npm-publish-main
+  cancel-in-progress: false
 
 jobs:
   publish:
     if: >
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_branch == 'main' &&
-      github.event.workflow_run.head_repository.full_name == github.repository
-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.head_repository.full_name == github.repository
+      )
     runs-on: ubuntu-latest
 
     steps:
-      # Check out the exact commit that passed CI
-      - name: Checkout the successful commit
+      - name: Checkout tested commit
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+          fetch-depth: 0
 
-      - name: Use Node 20
+      - name: Setup Node
         uses: actions/setup-node@v5
         with:
-          node-version: latest
+          node-version: 22
           registry-url: https://registry.npmjs.org
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v1
+        uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
-      - name: Install
+      - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # Optional: Re-run build to ensure publish artifacts exist
-      - name: Build
-        run: bun run build
+      - name: Lint
+        run: bun run lint
 
-      # Read current version from package.json
-      - name: Read current version
-        id: current-version
-        shell: bash
-        run: |
-          ver=$(node -p "require('./package.json').version")
-          echo "version=$ver" >> "$GITHUB_OUTPUT"
+      - name: Test
+        run: bun test
 
-      # Check if version was already bumped
-      - name: Check if version was bumped
-        id: version-check
-        shell: bash
-        run: |
-          # Get the latest GitHub release version using jq for reliable JSON parsing
-          LATEST_RELEASE=$(curl -s "https://api.github.com/repos/${{ github.repository }}/releases/latest" | jq -r '.tag_name // empty' 2>/dev/null || echo "")
-          CURRENT_VERSION="${{ steps.current-version.outputs.version }}"
-
-          echo "Latest release: $LATEST_RELEASE"
-          echo "Current version: $CURRENT_VERSION"
-
-          # Remove 'v' prefix from release tag for comparison
-          if [ -n "$LATEST_RELEASE" ] && [ "$LATEST_RELEASE" != "null" ]; then
-            LATEST_VERSION=$(echo "$LATEST_RELEASE" | sed 's/^v//')
-          else
-            LATEST_VERSION="0.0.0"
-          fi
-
-          if [ "$LATEST_VERSION" != "$CURRENT_VERSION" ]; then
-            echo "Version was already bumped from $LATEST_VERSION to $CURRENT_VERSION"
-            echo "bumped=false" >> "$GITHUB_OUTPUT"
-            echo "final_version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
-          else
-            echo "No version bump detected, will auto-patch bump"
-            echo "bumped=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      # Auto-patch bump version if no version change was made
-      - name: Auto-patch bump version
-        if: steps.version-check.outputs.bumped == 'true'
-        id: bump-version
+      - name: Auto-bump patch version
+        if: github.event_name == 'workflow_run'
+        id: bump
         shell: bash
         run: |
           npm version patch --no-git-tag-version
-          NEW_VERSION=$(node -p "require('./package.json').version")
-          echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
-          echo "Auto-bumped version to $NEW_VERSION"
+          bun install
+          VERSION="$(node -p "require('./package.json').version")"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Auto-bumped package version to ${VERSION}"
 
-      # Set final version
-      - name: Set final version
-        id: final-version
+      - name: Read package version
+        id: package-version
         shell: bash
         run: |
-          if [ "${{ steps.version-check.outputs.bumped }}" = "true" ]; then
-            echo "version=${{ steps.bump-version.outputs.version }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "version=${{ steps.current-version.outputs.version }}" >> "$GITHUB_OUTPUT"
+          VERSION="$(node -p "require('./package.json').version")"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure version is not already published
+        if: github.event_name == 'workflow_run' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == 'false')
+        shell: bash
+        run: |
+          VERSION="${{ steps.package-version.outputs.version }}"
+          if npm view "varsity@${VERSION}" version >/dev/null 2>&1; then
+            echo "varsity@${VERSION} is already published on npm."
+            exit 1
           fi
 
-      # Commit version bump if auto-bumped
-      - name: Commit auto-bumped version
-        if: steps.version-check.outputs.bumped == 'true'
+      - name: Build
+        run: bun run build
+
+      - name: Verify package contents
+        run: npm pack --dry-run
+
+      - name: Commit version bump
+        if: github.event_name == 'workflow_run'
         shell: bash
         run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add package.json
-          git commit -m "chore: auto-bump version to ${{ steps.bump-version.outputs.version }}"
+          VERSION="${{ steps.package-version.outputs.version }}"
+          TAG="${{ steps.package-version.outputs.tag }}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add package.json bun.lock
+          git commit -m "chore: release ${TAG} [skip ci]"
           git push origin HEAD:main
 
-      # Create a git tag like v1.2.3 if it doesn't already exist
-      - name: Create tag if missing
+      - name: Create and push tag
+        if: github.event_name == 'workflow_run'
         shell: bash
         run: |
-          TAG="v${{ steps.final-version.outputs.version }}"
+          TAG="${{ steps.package-version.outputs.tag }}"
+          git tag "${TAG}"
+          git push origin "${TAG}"
 
-          # Check if tag exists locally
-          if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "Tag $TAG already exists locally."
-            # Try to push it anyway (in case it's not on remote)
-            if git push origin "$TAG" 2>/dev/null; then
-              echo "Successfully pushed existing tag $TAG to remote."
-            else
-              echo "Tag $TAG already exists on remote as well."
-            fi
-          else
-            echo "Creating new tag $TAG"
-            git tag "$TAG" ${{ github.event.workflow_run.head_sha }}
-            if git push origin "$TAG" 2>/dev/null; then
-              echo "Successfully created and pushed tag $TAG"
-            else
-              echo "Tag $TAG already exists on remote, skipping push."
-            fi
-          fi
+      - name: Publish dry run
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run == 'true'
+        run: npm publish --dry-run --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      # Publish to npm (requires NPM_TOKEN in repo secrets)
       - name: Publish to npm
+        if: github.event_name == 'workflow_run' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == 'false')
         run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      # Create a GitHub Release for the tag
-      - name: Create GitHub Release
+      - name: Create GitHub release
+        if: github.event_name == 'workflow_run'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.final-version.outputs.version }}
-          name: v${{ steps.final-version.outputs.version }}
+          tag_name: ${{ steps.package-version.outputs.tag }}
+          name: ${{ steps.package-version.outputs.tag }}
           generate_release_notes: true

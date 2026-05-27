@@ -139,6 +139,17 @@ const detectPartialType = (
 };
 
 /**
+ * Normalize a patch-versioned OpenAPI version (e.g. `3.0.3`) into the base
+ * version used to key partial schemas (`3.0`, `3.1`, `3.2`).
+ */
+const normalizePartialVersion = (version: OpenAPIVersion): string => {
+  if (version.startsWith("3.0")) return "3.0";
+  if (version.startsWith("3.1")) return "3.1";
+  if (version.startsWith("3.2")) return "3.2";
+  return version;
+};
+
+/**
  * Validate a partial OpenAPI document
  */
 export const validatePartialDocument = (
@@ -168,8 +179,9 @@ export const validatePartialDocument = (
     };
   }
 
-  // Get the appropriate schema for this partial document type
-  const schemaKey = `${version}.${partialType}`;
+  // Get the appropriate schema for this partial document type. Partial
+  // schemas are keyed by the base version (3.0/3.1/3.2), so normalize first.
+  const schemaKey = `${normalizePartialVersion(version)}.${partialType}`;
   const schema = partialSchemas.get(schemaKey);
 
   if (!schema) {

@@ -212,7 +212,12 @@ export const validateMultipleRecursively = async (
 };
 
 /**
- * Find all references in a document without resolving them
+ * Find all references in a document without resolving them. Internal refs
+ * (`#/...`) are also analyzed for true cycles in the reference graph.
+ *
+ * "Circular" here means the proper definition: a $ref reachable from itself
+ * via a chain of intermediate $refs (A -> B -> A). A component that is simply
+ * referenced from multiple places is NOT circular.
  */
 export const analyzeReferences = async (
   source: string
@@ -230,31 +235,11 @@ export const analyzeReferences = async (
   const references = findReferences(parsed.spec);
   log.validationStep("References found", `${references.length} total`);
 
-  // Check for circular references by analyzing reference paths
-  log.validationStep("Analyzing circular references");
-  const circularReferences: string[] = [];
-  const referenceMap = new Map<string, string[]>();
-
-  for (const ref of references) {
-    const refValue = ref.value;
-    if (!referenceMap.has(refValue)) {
-      referenceMap.set(refValue, []);
-    }
-    referenceMap.get(refValue)!.push(ref.path);
-  }
-
-  // Simple circular reference detection based on reference patterns
-  for (const [refValue, paths] of referenceMap) {
-    if (paths.length > 1) {
-      // This is a potential circular reference
-      log.referenceStep(
-        "Circular reference detected",
-        refValue,
-        `${paths.length} occurrences`
-      );
-      circularReferences.push(refValue);
-    }
-  }
+  log.validationStep("Detecting circular references");
+  const circularReferences = detectCircularInternalRefs(
+    parsed.spec as unknown,
+    references
+  );
 
   const result = {
     references,
@@ -269,4 +254,97 @@ export const analyzeReferences = async (
   );
 
   return result;
+};
+
+/**
+ * Walk the reference graph for INTERNAL ($ref starting with `#/`) refs and
+ * return every node that participates in a cycle (DFS with stack tracking).
+ */
+const detectCircularInternalRefs = (
+  rootDoc: unknown,
+  references: Array<{ path: string; value: string }>
+): string[] => {
+  // Build adjacency: for each internal $ref target, find the refs reachable
+  // from inside that target's resolved value.
+  const adjacency = new Map<string, Set<string>>();
+
+  const internalRefValues = new Set(
+    references
+      .map((r) => r.value)
+      .filter((v) => typeof v === "string" && v.startsWith("#/"))
+  );
+
+  const resolvePointer = (ref: string): unknown => {
+    const parts = ref
+      .substring(2)
+      .split("/")
+      .map((s) => s.replace(/~1/g, "/").replace(/~0/g, "~"));
+    let current: unknown = rootDoc;
+    for (const part of parts) {
+      if (current && typeof current === "object") {
+        current = (current as Record<string, unknown>)[part];
+      } else {
+        return undefined;
+      }
+    }
+    return current;
+  };
+
+  const collectChildRefs = (value: unknown, out: Set<string>): void => {
+    if (Array.isArray(value)) {
+      for (const v of value) collectChildRefs(v, out);
+      return;
+    }
+    if (value && typeof value === "object") {
+      for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+        if (k === "$ref" && typeof v === "string" && v.startsWith("#/")) {
+          out.add(v);
+        } else {
+          collectChildRefs(v, out);
+        }
+      }
+    }
+  };
+
+  for (const ref of internalRefValues) {
+    const target = resolvePointer(ref);
+    const children = new Set<string>();
+    if (target !== undefined) collectChildRefs(target, children);
+    adjacency.set(ref, children);
+  }
+
+  // Tarjan-style DFS to find any ref that participates in a cycle.
+  const onStack = new Set<string>();
+  const visited = new Set<string>();
+  const cyclic = new Set<string>();
+
+  const dfs = (node: string, stack: string[]): void => {
+    visited.add(node);
+    onStack.add(node);
+    stack.push(node);
+
+    for (const next of adjacency.get(node) ?? []) {
+      if (onStack.has(next)) {
+        // Found a cycle; every node from `next` to the top of the stack is on it.
+        const cycleStartIndex = stack.indexOf(next);
+        if (cycleStartIndex >= 0) {
+          for (let i = cycleStartIndex; i < stack.length; i++) {
+            const member = stack[i];
+            if (member) cyclic.add(member);
+          }
+        }
+      } else if (!visited.has(next)) {
+        dfs(next, stack);
+      }
+    }
+
+    stack.pop();
+    onStack.delete(node);
+  };
+
+  for (const node of internalRefValues) {
+    if (!visited.has(node)) dfs(node, []);
+  }
+
+  return [...cyclic].sort();
 };

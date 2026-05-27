@@ -25,6 +25,18 @@ export {
   resolveAllReferences,
   // Partial validation exports
   validatePartialDocument,
+  // Partitioner exports
+  partitionByTags,
+  partitionSpecByTags,
+  writePartitionPlan,
+  describePartitionPlan,
+  collectTagBuckets,
+  slugify,
+  slugifyPath,
+  // Serializer exports
+  serialize,
+  extensionFor,
+  detectFormatFromPath,
 } from "./src/varsity.js";
 
 // Type exports
@@ -45,6 +57,19 @@ export type {
   ResolvedReference,
   ReferenceContext,
 } from "./src/ref-resolver.js";
+
+export type {
+  PartitionOptions,
+  PartitionPlan,
+  PartitionTag,
+  PartitionFile,
+  TagBucket,
+  BucketedPathItem,
+  WriteResult,
+  WriteOptions,
+} from "./src/partitioner.js";
+
+export type { SerializationFormat } from "./src/serializer.js";
 
 // Default export - functional instance
 export { default } from "./src/varsity.js";

@@ -218,60 +218,128 @@ const performStrictValidation = (
 };
 
 /**
- * Validate examples in the specification
+ * Validate `example` / `examples` values against their declared `schema`.
+ *
+ * Walks the entire spec tree looking for objects that carry both a `schema`
+ * and one or more `example` / `examples` siblings (the canonical OpenAPI
+ * shape for parameters, headers, request bodies' media types, response
+ * media types, etc.). Compiles each schema with AJV and validates every
+ * example value, recording AJV errors as validation errors and warnings.
+ *
+ * Schemas that contain `$ref` are skipped (we don't resolve refs here);
+ * those are validated indirectly via the recursive validator.
  */
 const validateExamples = (
   spec: OpenAPISpec,
-  version: OpenAPIVersion,
+  _version: OpenAPIVersion,
   errors: ValidationError[],
   warnings: ValidationError[]
 ): void => {
   log.validationStep("Validating examples in specification");
 
   let exampleCount = 0;
+  let invalidCount = 0;
 
-  if (spec.paths) {
-    log.validationStep("Analyzing examples in paths");
-    for (const [path, pathItem] of Object.entries(spec.paths)) {
-      if (typeof pathItem === "object" && pathItem !== null) {
-        for (const [method, operation] of Object.entries(pathItem)) {
-          if (
-            typeof operation === "object" &&
-            operation !== null &&
-            "responses" in operation
-          ) {
-            log.endpointStep("Validating examples", method, path);
-            // Check response examples
-            for (const [statusCode, response] of Object.entries(
-              operation.responses
-            )) {
-              if (
-                typeof response === "object" &&
-                response !== null &&
-                "examples" in response
-              ) {
-                log.validationStep(
-                  "Found examples in response",
-                  `${method} ${path} ${statusCode}`
-                );
-                exampleCount++;
-                // Validate examples here
-              }
-            }
-          }
+  const containsRef = (value: unknown): boolean => {
+    if (Array.isArray(value)) return value.some(containsRef);
+    if (value && typeof value === "object") {
+      for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+        if (k === "$ref") return true;
+        if (containsRef(v)) return true;
+      }
+    }
+    return false;
+  };
+
+  const validateOne = (
+    schema: unknown,
+    example: unknown,
+    pathStr: string
+  ): void => {
+    exampleCount++;
+    if (containsRef(schema)) {
+      // Skip schemas containing $ref; AJV would need a fully-resolved
+      // schema for those. Recursive validation handles that path.
+      return;
+    }
+    try {
+      const validateFn = ajv.compile(schema as object);
+      const ok = validateFn(example);
+      if (!ok && validateFn.errors) {
+        for (const err of validateFn.errors) {
+          invalidCount++;
+          warnings.push({
+            path: `${pathStr}${err.instancePath || ""}`,
+            message: `Example does not match schema: ${err.message ?? "unknown error"}`,
+            data: err.data,
+            schemaPath: err.schemaPath,
+          });
+        }
+      }
+    } catch (e) {
+      warnings.push({
+        path: pathStr,
+        message: `Could not compile schema for example check: ${
+          e instanceof Error ? e.message : "unknown error"
+        }`,
+      });
+    }
+  };
+
+  const walk = (value: unknown, currentPath: string): void => {
+    if (Array.isArray(value)) {
+      for (let i = 0; i < value.length; i++) {
+        walk(value[i], `${currentPath}[${i}]`);
+      }
+      return;
+    }
+    if (!value || typeof value !== "object") return;
+
+    const node = value as Record<string, unknown>;
+    const schema = node.schema;
+
+    if (schema !== undefined && typeof schema === "object") {
+      if (node.example !== undefined) {
+        validateOne(schema, node.example, `${currentPath}.example`);
+      }
+      if (node.examples && typeof node.examples === "object") {
+        for (const [name, ex] of Object.entries(
+          node.examples as Record<string, unknown>
+        )) {
+          // OpenAPI 3.x Example Object wraps the value under .value
+          const value =
+            ex && typeof ex === "object" && "value" in (ex as object)
+              ? (ex as { value: unknown }).value
+              : ex;
+          validateOne(schema, value, `${currentPath}.examples.${name}`);
         }
       }
     }
-  }
+
+    for (const [k, v] of Object.entries(node)) {
+      walk(v, currentPath ? `${currentPath}.${k}` : k);
+    }
+  };
+
+  walk(spec, "");
 
   log.validationStep(
     "Example validation completed",
-    `Found ${exampleCount} examples`
+    `Checked ${exampleCount} example(s), ${invalidCount} did not match their schema`
   );
+
+  // Note: example mismatches are recorded as warnings (not errors) so they
+  // don't fail otherwise-valid specs. They appear in `result.warnings`.
+  void errors;
 };
 
 /**
- * Validate references in the specification
+ * Validate references in the specification.
+ *
+ * This shallow check only verifies that internal pointers (`#/...`) resolve
+ * inside the document. External file/URL refs cannot be resolved without
+ * fetching, so they are skipped here — use the `--recursive` option (which
+ * routes through `validateRecursively`) for full reference validation.
  */
 const validateReferences = (
   spec: OpenAPISpec,
@@ -281,13 +349,17 @@ const validateReferences = (
 ): void => {
   log.validationStep("Validating references in specification");
 
-  // This would implement reference validation logic
-  // Check for broken $ref references
   const refs = findReferences(spec);
   let validRefs = 0;
   let brokenRefs = 0;
+  let skippedExternal = 0;
 
   for (const ref of refs) {
+    if (!ref.value.startsWith("#/")) {
+      // External or URL ref — not in scope for the shallow check.
+      skippedExternal++;
+      continue;
+    }
     if (!resolveReference(spec, ref)) {
       log.referenceStep("Broken reference found", ref.value, `at ${ref.path}`);
       errors.push({
@@ -302,7 +374,7 @@ const validateReferences = (
 
   log.validationStep(
     "Reference validation completed",
-    `Valid: ${validRefs}, Broken: ${brokenRefs}`
+    `Valid: ${validRefs}, Broken: ${brokenRefs}, External (skipped): ${skippedExternal}`
   );
 };
 
