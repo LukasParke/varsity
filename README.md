@@ -300,7 +300,7 @@ interface WriteOptions {
 ### Requirements
 
 - Bun
-- Node.js 22 or newer for the built CLI and npm publishing workflow
+- Node.js 24 or newer for the built CLI and npm Trusted Publishing workflow
 - TypeScript 5
 
 ### Local Workflow
@@ -338,6 +338,8 @@ Repository configuration alone is not enough to enable Trusted Publishing. The n
 - Environment: none, unless you later add a GitHub environment gate
 
 Once npm Trusted Publishing is configured, no `NPM_TOKEN` repository secret is required for publishing.
+
+The publish workflow uses Node.js 24 so npm includes Trusted Publishing support. npm 11.5.1 or newer is required for the OIDC publish flow.
 
 ### Manual Publish Workflow
 

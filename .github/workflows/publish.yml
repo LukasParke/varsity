@@ -46,8 +46,25 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version: 24
           registry-url: https://registry.npmjs.org
+
+      - name: Verify npm trusted publishing support
+        shell: bash
+        run: |
+          NPM_VERSION="$(npm --version)"
+          echo "npm version: ${NPM_VERSION}"
+          NPM_VERSION="${NPM_VERSION}" node -e '
+            const version = process.env.NPM_VERSION ?? "";
+            const [major = 0, minor = 0, patch = 0] = version.split(".").map(Number);
+            const supported =
+              major > 11 ||
+              (major === 11 && (minor > 5 || (minor === 5 && patch >= 1)));
+            if (!supported) {
+              console.error(`npm ${version} is too old for npm Trusted Publishing. Use npm 11.5.1 or newer.`);
+              process.exit(1);
+            }
+          '
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
