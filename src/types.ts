@@ -1,6 +1,9 @@
 import type { JSONSchemaType } from "ajv";
 import type { OpenAPI2, OpenAPI3, OpenAPI3_1, OpenAPI3_2 } from "oas-types";
 
+export const DEFAULT_MAX_REF_DEPTH = 10;
+export const DEFAULT_PARTITION_MAX_REF_DEPTH = 25;
+
 export interface ValidationError {
   path: string;
   message: string;
@@ -20,9 +23,11 @@ export interface ValidationOptions {
   strict?: boolean;
   validateExamples?: boolean;
   validateReferences?: boolean;
-  customRules?: Record<string, any>;
+  customSchemas?: Record<string, JSONSchemaType<any>>;
   maxRefDepth?: number;
   recursive?: boolean;
+  strictSchema?: boolean;
+  silent?: boolean;
 }
 
 export interface ReportOptions {
@@ -66,11 +71,38 @@ export type OpenAPISpec =
   | OpenAPI3_1.Specification
   | OpenAPI3_2.Specification;
 
+export type DocumentInput =
+  | string
+  | OpenAPISpec
+  | {
+      kind: "path";
+      path: string;
+      cwd?: string;
+      source?: string;
+    }
+  | {
+      kind: "url";
+      url: string;
+      headers?: Record<string, string>;
+      timeoutMs?: number;
+    }
+  | {
+      kind: "content";
+      content: string;
+      source?: string;
+    }
+  | {
+      kind: "object";
+      value: unknown;
+      source?: string;
+    };
+
 export interface VarsityConfig {
   defaultVersion?: OpenAPIVersion;
   strictMode?: boolean;
   customSchemas?: Record<string, JSONSchemaType<any>>;
   reportFormats?: ReportOptions["format"][];
+  silent?: boolean;
 }
 
 export interface CLIResult {

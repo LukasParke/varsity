@@ -14,7 +14,7 @@ import type { OpenAPI3_1, OpenAPI3_2, OpenAPI3, OpenAPI2 } from "oas-types";
 import { log } from "./logger.js";
 
 // Initialize AJV instance
-const createAjvInstance = (): Ajv => {
+const createAjvInstance = (customSchemas?: Record<string, JSONSchemaType<any>>): Ajv => {
   const ajv = new Ajv({
     allErrors: true,
     verbose: true,
@@ -22,6 +22,11 @@ const createAjvInstance = (): Ajv => {
     validateFormats: true,
   });
   addFormats(ajv);
+  if (customSchemas) {
+    for (const [key, schema] of Object.entries(customSchemas)) {
+      ajv.addSchema(schema as object, key);
+    }
+  }
   return ajv;
 };
 
@@ -358,6 +363,10 @@ const validateReferences = (
     if (!ref.value.startsWith("#/")) {
       // External or URL ref — not in scope for the shallow check.
       skippedExternal++;
+      warnings.push({
+        path: ref.path,
+        message: `External reference skipped by shallow validation: ${ref.value}. Use recursive validation to resolve it.`,
+      });
       continue;
     }
     if (!resolveReference(spec, ref)) {
@@ -404,7 +413,10 @@ export const validateOpenAPISpec = (
   }
 
   log.validationStep("Compiling schema for validation");
-  const validate = ajv.compile(schema);
+  const validationAjv = options.customSchemas
+    ? createAjvInstance(options.customSchemas)
+    : ajv;
+  const validate = validationAjv.compile(schema);
   log.validationStep("Running schema validation");
   const valid = validate(spec);
 
@@ -424,7 +436,11 @@ export const validateOpenAPISpec = (
         schemaPath: error.schemaPath,
       };
 
-      if (error.keyword === "required" || error.keyword === "type") {
+      if (
+        options.strictSchema !== false ||
+        error.keyword === "required" ||
+        error.keyword === "type"
+      ) {
         log.validationStep(
           "Schema validation error",
           `${error.keyword}: ${validationError.message}`

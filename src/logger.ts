@@ -1,6 +1,7 @@
 import { performance } from "perf_hooks";
 
 export interface LogLevel {
+  SILENT: -1;
   ERROR: 0;
   WARN: 1;
   INFO: 2;
@@ -9,6 +10,7 @@ export interface LogLevel {
 }
 
 export const LOG_LEVELS: LogLevel = {
+  SILENT: -1,
   ERROR: 0,
   WARN: 1,
   INFO: 2,
@@ -78,6 +80,7 @@ export class Logger {
     if (!this.config.useColors) return "";
 
     const colors = {
+      SILENT: "",
       ERROR: "\x1b[31m", // Red
       WARN: "\x1b[33m", // Yellow
       INFO: "\x1b[36m", // Cyan
@@ -93,6 +96,7 @@ export class Logger {
   }
 
   private shouldLog(level: keyof LogLevel): boolean {
+    if (this.config.level === "SILENT") return false;
     return LOG_LEVELS[level] <= LOG_LEVELS[this.config.level];
   }
 
@@ -119,7 +123,7 @@ export class Logger {
     if (!this.shouldLog(level)) return;
 
     const formatted = this.formatMessage(level, message, data);
-    console.log(formatted);
+    process.stderr.write(`${formatted}\n`);
   }
 
   public error(message: string, data?: any): void {
@@ -181,14 +185,14 @@ export class Logger {
     const filledLength = Math.round((percentage / 100) * barLength);
     const bar = "█".repeat(filledLength) + "░".repeat(barLength - filledLength);
 
-    process.stdout.write(
+    process.stderr.write(
       `\r${this.getTimestamp()}${this.getColorCode(
         "INFO"
       )}PROGRESS${this.getResetColor()} ${label}: [${bar}] ${percentage}% (${current}/${total})`
     );
 
     if (current >= total) {
-      process.stdout.write("\n");
+      process.stderr.write("\n");
       this.currentProgress = null;
     }
   }
@@ -389,6 +393,10 @@ export class Logger {
   public setLevel(level: keyof LogLevel): void {
     this.config.level = level;
   }
+
+  public configure(config: Partial<LoggerConfig>): void {
+    this.config = { ...this.config, ...config };
+  }
 }
 
 // Global logger instance
@@ -443,4 +451,5 @@ export const log = {
     logger.setShowProgress(showProgress),
   setUseColors: (useColors: boolean) => logger.setUseColors(useColors),
   setLevel: (level: keyof LogLevel) => logger.setLevel(level),
+  configure: (config: Partial<LoggerConfig>) => logger.configure(config),
 };

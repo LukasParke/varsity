@@ -1,9 +1,12 @@
-import { readFileSync } from "fs";
-import { resolve } from "path";
-import * as yaml from "js-yaml";
-import type { ParsedSpec, OpenAPIVersion, OpenAPISpec } from "./types.js";
+import type {
+  DocumentInput,
+  ParsedSpec,
+  OpenAPIVersion,
+  OpenAPISpec,
+} from "./types.js";
 import type { OpenAPI2, OpenAPI3, OpenAPI3_1 } from "oas-types";
 import { log } from "./logger.js";
+import { loadDocument } from "./document.js";
 
 /**
  * Detect OpenAPI version from specification
@@ -78,74 +81,17 @@ const extractMetadata = (
 };
 
 /**
- * Parse an OpenAPI specification from a file path or URL
+ * Parse an OpenAPI specification from a file path, URL, content, stdin, or object.
  */
-export const parseOpenAPISpec = async (source: string): Promise<ParsedSpec> => {
+export const parseOpenAPISpec = async (
+  source: DocumentInput
+): Promise<ParsedSpec> => {
   log.startOperation("Parsing OpenAPI specification");
-  log.fileOperation("Reading specification", source);
-
-  let content: string;
-  let spec: any;
+  log.fileOperation("Reading specification", typeof source === "string" ? source : "input");
 
   try {
-    // Handle file paths
-    if (source.startsWith("http://") || source.startsWith("https://")) {
-      log.parsingStep("Fetching remote specification", source);
-      const response = await fetch(source);
-      if (!response.ok) {
-        log.error("Failed to fetch remote specification", {
-          url: source,
-          status: response.status,
-          statusText: response.statusText,
-        });
-        throw new Error(
-          `Failed to fetch specification: ${response.statusText}`
-        );
-      }
-      content = await response.text();
-      log.parsingStep(
-        "Remote specification fetched",
-        `Size: ${content.length} characters`
-      );
-    } else {
-      // Local file
-      log.parsingStep("Reading local file", source);
-      const filePath = resolve(source);
-      log.fileOperation("Reading file", filePath);
-      content = readFileSync(filePath, "utf-8");
-      log.parsingStep("Local file read", `Size: ${content.length} characters`);
-    }
-
-    // Parse JSON or YAML
-    log.parsingStep("Determining content format");
-    if (content.trim().startsWith("{") || content.trim().startsWith("[")) {
-      log.parsingStep("Detected JSON format");
-      log.parsingStep("Parsing JSON content");
-      spec = JSON.parse(content);
-      log.parsingStep("JSON parsing completed");
-    } else {
-      // Parse YAML
-      log.parsingStep("Detected YAML format");
-      log.parsingStep("Parsing YAML content");
-      try {
-        spec = yaml.load(content);
-        log.parsingStep("YAML parsing completed");
-      } catch (yamlError) {
-        log.error("YAML parsing failed", {
-          error:
-            yamlError instanceof Error
-              ? yamlError.message
-              : "Unknown YAML error",
-        });
-        throw new Error(
-          `Failed to parse YAML: ${
-            yamlError instanceof Error
-              ? yamlError.message
-              : "Unknown YAML error"
-          }`
-        );
-      }
-    }
+    const loaded = await loadDocument(source);
+    const spec = loaded.document;
 
     const version = detectVersion(spec);
     log.parsingStep("Version detection completed", `Detected: ${version}`);
@@ -159,7 +105,7 @@ export const parseOpenAPISpec = async (source: string): Promise<ParsedSpec> => {
     const result = {
       spec: typedSpec,
       version,
-      source,
+      source: loaded.resolvedPath ?? loaded.source,
       metadata,
     };
 

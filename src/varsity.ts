@@ -11,7 +11,13 @@ import {
 	generateDetailedSummary,
 	generateJSONSummary,
 } from "./summary-analyzer.js";
+import {
+	partitionByTags,
+	partitionSpecByTags,
+	writePartitionPlan,
+} from "./partitioner.js";
 import type {
+	DocumentInput,
 	OpenAPISpec,
 	ParsedSpec,
 	RecursiveValidationResult,
@@ -30,14 +36,53 @@ const defaultConfig: VarsityConfig = {
 	reportFormats: ["json"],
 };
 
+const formatSource = (source: DocumentInput): string => {
+	if (typeof source === "string") return source;
+	if ("kind" in source) {
+		if (source.kind === "path") return source.path;
+		if (source.kind === "url") return source.url;
+		return source.source ?? `<${source.kind}>`;
+	}
+	return "<object>";
+};
+
+const configureLibraryLogging = (
+	config: VarsityConfig = defaultConfig,
+	options: ValidationOptions = {},
+): void => {
+	if (config.silent || options.silent) {
+		log.setLevel("SILENT");
+	}
+};
+
+const buildValidationOptions = (
+	options: ValidationOptions,
+	config: VarsityConfig,
+): ValidationOptions => ({
+	strict: options.strict ?? config.strictMode,
+	validateExamples: options.validateExamples ?? false,
+	validateReferences: options.validateReferences ?? false,
+	customSchemas: {
+		...(config.customSchemas ?? {}),
+		...(options.customSchemas ?? {}),
+	},
+	maxRefDepth: options.maxRefDepth,
+	recursive: options.recursive,
+	strictSchema: options.strictSchema,
+	silent: options.silent ?? config.silent,
+});
+
 /**
  * Parse and validate an OpenAPI specification or multiple specifications
  */
 export const validate = async (
-	source: string | string[],
+	source: DocumentInput | DocumentInput[],
 	options: ValidationOptions = {},
 	config: VarsityConfig = defaultConfig,
 ): Promise<ValidationResult | ValidationResult[]> => {
+	const validationConfig = buildValidationOptions(options, config);
+	configureLibraryLogging(config, options);
+
 	// If source is an array, validate multiple specifications
 	if (Array.isArray(source)) {
 		const results: ValidationResult[] = [];
@@ -46,18 +91,18 @@ export const validate = async (
 			const singleSource = source[i];
 			if (!singleSource) continue;
 
-			log.info(`📄 Parsing: ${singleSource}`);
+			log.info(`📄 Parsing: ${formatSource(singleSource)}`);
 			try {
-				const result = await validateSingle(singleSource, options, config);
+				const result = await validateSingle(singleSource, validationConfig, config);
 				results.push(result);
 				log.info(
-					`✅ Validated: ${singleSource} - ${
+					`✅ Validated: ${formatSource(singleSource)} - ${
 						result.valid ? "Valid" : "Invalid"
 					}`,
 				);
 			} catch (error) {
 				log.error(
-					`❌ Failed: ${singleSource} - ${
+					`❌ Failed: ${formatSource(singleSource)} - ${
 						error instanceof Error ? error.message : "Unknown error"
 					}`,
 				);
@@ -89,9 +134,11 @@ export const validate = async (
 	}
 
 	// Single specification validation
-	log.info(`📄 Parsing: ${source}`);
-	const result = await validateSingle(source, options, config);
-	log.info(`✅ Validated: ${source} - ${result.valid ? "Valid" : "Invalid"}`);
+	log.info(`📄 Parsing: ${formatSource(source)}`);
+	const result = await validateSingle(source, validationConfig, config);
+	log.info(
+		`✅ Validated: ${formatSource(source)} - ${result.valid ? "Valid" : "Invalid"}`,
+	);
 
 	return result;
 };
@@ -100,26 +147,17 @@ export const validate = async (
  * Internal function to validate a single OpenAPI specification
  */
 const validateSingle = async (
-	source: string,
+	source: DocumentInput,
 	options: ValidationOptions = {},
 	config: VarsityConfig = defaultConfig,
 ): Promise<ValidationResult> => {
 	const parsed = await parseOpenAPISpec(source);
 
-	// Merge options with config
-	const validationOptions: ValidationOptions = {
-		strict: options.strict ?? config.strictMode,
-		validateExamples: options.validateExamples ?? false,
-		validateReferences: options.validateReferences ?? false,
-		customRules: options.customRules,
-		...options,
-	};
-
 	// If recursive validation is requested, use the recursive validator
 	if (options.recursive) {
 		const recursiveResult = await validateRecursively(
 			source,
-			validationOptions,
+			options,
 		);
 
 		return {
@@ -134,7 +172,7 @@ const validateSingle = async (
 	const result = validateOpenAPISpec(
 		parsed.spec,
 		parsed.version,
-		validationOptions,
+		options,
 	);
 
 	return result;
@@ -143,9 +181,10 @@ const validateSingle = async (
 /**
  * Parse an OpenAPI specification without validation
  */
-export const parse = async (source: string): Promise<ParsedSpec> => {
+export const parse = async (source: DocumentInput): Promise<ParsedSpec> => {
+	configureLibraryLogging(defaultConfig);
 	log.startOperation("Parsing OpenAPI specification");
-	log.fileOperation("Parsing specification", source);
+	log.fileOperation("Parsing specification", formatSource(source));
 
 	const result = await parseOpenAPISpec(source);
 
@@ -164,13 +203,13 @@ export const parse = async (source: string): Promise<ParsedSpec> => {
  * Generate a validation report
  */
 export const generateValidationReport = async (
-	source: string,
+	source: DocumentInput,
 	reportOptions: ReportOptions,
 	validationOptions: ValidationOptions = {},
 	config: VarsityConfig = defaultConfig,
 ): Promise<string> => {
 	log.startOperation("Generating validation report");
-	log.fileOperation("Generating report", source);
+	log.fileOperation("Generating report", formatSource(source));
 
 	const result = await validate(source, validationOptions, config);
 	// Since source is a string, result will be ValidationResult, not ValidationResult[]
@@ -192,7 +231,7 @@ export const generateValidationReport = async (
  * Save a validation report to file
  */
 export const saveValidationReport = async (
-	source: string,
+	source: DocumentInput,
 	reportOptions: ReportOptions,
 	validationOptions: ValidationOptions = {},
 	config: VarsityConfig = defaultConfig,
@@ -206,7 +245,7 @@ export const saveValidationReport = async (
 	if (reportOptions.output) {
 		saveReport(report, reportOptions.output);
 	} else {
-		console.log(report);
+		log.info(report);
 	}
 };
 
@@ -214,30 +253,38 @@ export const saveValidationReport = async (
  * Recursively validate an OpenAPI specification and all its references
  */
 export const validateWithReferences = async (
-	source: string,
+	source: DocumentInput,
 	options: ValidationOptions = {},
 	config: VarsityConfig = defaultConfig,
 ): Promise<RecursiveValidationResult> => {
-	return validateRecursively(source, { ...options, recursive: true });
+	configureLibraryLogging(config, options);
+	return validateRecursively(source, {
+		...buildValidationOptions(options, config),
+		recursive: true,
+	});
 };
 
 /**
  * Recursively validate multiple OpenAPI specifications
  */
 export const validateMultipleWithReferences = async (
-	sources: string[],
+	sources: DocumentInput[],
 	options: ValidationOptions = {},
 	config: VarsityConfig = defaultConfig,
 ): Promise<RecursiveValidationResult[]> => {
-	return validateMultipleRecursively(sources, { ...options, recursive: true });
+	configureLibraryLogging(config, options);
+	return validateMultipleRecursively(sources, {
+		...buildValidationOptions(options, config),
+		recursive: true,
+	});
 };
 
 /**
  * Analyze references in an OpenAPI specification
  */
-export const analyzeDocumentReferences = async (source: string) => {
+export const analyzeDocumentReferences = async (source: DocumentInput) => {
 	log.startOperation("Analyzing document references");
-	log.fileOperation("Analyzing references", source);
+	log.fileOperation("Analyzing references", formatSource(source));
 
 	const result = await analyzeReferences(source);
 
@@ -254,7 +301,7 @@ export const analyzeDocumentReferences = async (source: string) => {
  * Generate a comprehensive summary of an OpenAPI specification
  */
 export const generateSpecificationSummary = async (
-	source: string,
+	source: DocumentInput,
 	validationOptions: ValidationOptions = {},
 	config: VarsityConfig = defaultConfig,
 ): Promise<{
@@ -263,7 +310,7 @@ export const generateSpecificationSummary = async (
 	jsonSummary: string;
 }> => {
 	log.startOperation("Generating specification summary");
-	log.fileOperation("Generating summary", source);
+	log.fileOperation("Generating summary", formatSource(source));
 
 	// Parse the specification
 	const parsed = await parseOpenAPISpec(source);
@@ -345,11 +392,23 @@ export const createVarsity = (config: VarsityConfig = {}) => {
 	const mergedConfig = { ...defaultConfig, ...config };
 
 	return {
-		validate: (source: string | string[], options: ValidationOptions = {}) =>
+		validate: (
+			source: DocumentInput | DocumentInput[],
+			options: ValidationOptions = {},
+		) =>
 			validate(source, options, mergedConfig),
-		parse,
+		validateWithReferences: (
+			source: DocumentInput,
+			options: ValidationOptions = {},
+		) => validateWithReferences(source, options, mergedConfig),
+		validateMultipleWithReferences: (
+			sources: DocumentInput[],
+			options: ValidationOptions = {},
+		) => validateMultipleWithReferences(sources, options, mergedConfig),
+		parse: (source: DocumentInput) => parse(source),
+		analyze: (source: DocumentInput) => analyzeDocumentReferences(source),
 		generateReport: (
-			source: string,
+			source: DocumentInput,
 			reportOptions: ReportOptions,
 			validationOptions: ValidationOptions = {},
 		) =>
@@ -359,6 +418,11 @@ export const createVarsity = (config: VarsityConfig = {}) => {
 				validationOptions,
 				mergedConfig,
 			),
+		summary: (source: DocumentInput, options: ValidationOptions = {}) =>
+			generateSpecificationSummary(source, options, mergedConfig),
+		partitionByTags,
+		partitionSpecByTags,
+		writePartitionPlan,
 		getSupportedVersions,
 		getConfig: () => ({ ...mergedConfig }),
 		updateConfig: (newConfig: Partial<VarsityConfig>) => {

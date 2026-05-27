@@ -1,11 +1,11 @@
-import { readFileSync, mkdirSync, writeFileSync, rmSync } from "fs";
+import { mkdirSync, writeFileSync, rmSync } from "fs";
 import { dirname, resolve, basename, extname } from "path";
-import * as yaml from "js-yaml";
 import type { OpenAPISpec, ParsedSpec } from "./types.js";
 import { parseOpenAPISpec } from "./parser.js";
 import { serialize, extensionFor } from "./serializer.js";
 import type { SerializationFormat } from "./serializer.js";
 import { log } from "./logger.js";
+import { loadDocumentSync } from "./document.js";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -157,12 +157,7 @@ const cloneJson = <T>(value: T): T =>
  * Parse a JSON or YAML file from disk into a JS object.
  */
 const parseSidecarFile = (filePath: string): unknown => {
-  const content = readFileSync(filePath, "utf-8");
-  const trimmed = content.trim();
-  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-    return JSON.parse(content);
-  }
-  return yaml.load(content);
+  return loadDocumentSync(filePath).document;
 };
 
 // ---------------------------------------------------------------------------

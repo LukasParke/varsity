@@ -321,7 +321,7 @@ describe("partitioner / file-ref based source (main-api.json)", () => {
 });
 
 describe("CLI command naming", () => {
-	test("registers partition and leaves split unregistered", () => {
+	test("registers partition and reports split as renamed", () => {
 		const partitionHelp = spawnSync(
 			"bun",
 			["run", "src/cli.ts", "partition", "--help"],
@@ -335,13 +335,13 @@ describe("CLI command naming", () => {
 
 		const splitHelp = spawnSync(
 			"bun",
-			["run", "src/cli.ts", "split", "--help"],
+			["run", "src/cli.ts", "split"],
 			{
 				cwd: resolve(__dirname, ".."),
 				encoding: "utf-8",
 			},
 		);
 		expect(splitHelp.status).not.toBe(0);
-		expect(splitHelp.stderr).toContain("unknown command");
+		expect(splitHelp.stderr).toContain("renamed to 'partition'");
 	});
 });

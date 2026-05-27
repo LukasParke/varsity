@@ -160,6 +160,21 @@ export const validatePartialDocument = (
   const errors: ValidationError[] = [];
   const warnings: ValidationError[] = [];
 
+  if (
+    document &&
+    typeof document === "object" &&
+    typeof document.$ref === "string" &&
+    Object.keys(document).length === 1
+  ) {
+    return {
+      valid: true,
+      errors,
+      warnings,
+      spec: document,
+      version,
+    };
+  }
+
   // Detect the type of partial document
   const partialType = detectPartialType(document, version);
 

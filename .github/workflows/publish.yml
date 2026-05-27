@@ -113,6 +113,12 @@ jobs:
       - name: Build
         run: bun run build
 
+      - name: Smoke test built CLI
+        run: |
+          node dist/cli.js --version
+          node dist/cli.js info
+          node dist/cli.js validate test/sample-openapi.json --json
+
       - name: Verify package contents
         run: npm pack --dry-run
 

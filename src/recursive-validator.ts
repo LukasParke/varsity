@@ -3,30 +3,20 @@ import { validateOpenAPISpec } from "./validator.js";
 import { validatePartialDocument } from "./partial-validator.js";
 import { resolveAllReferences, findReferences } from "./ref-resolver.js";
 import type {
+  DocumentInput,
   ValidationResult,
   ValidationError,
   ValidationOptions,
-  OpenAPIVersion,
   OpenAPISpec,
+  RecursiveValidationResult,
 } from "./types.js";
 import { log } from "./logger.js";
-
-export interface RecursiveValidationResult extends ValidationResult {
-  partialValidations: Array<{
-    path: string;
-    result: ValidationResult;
-    isCircular: boolean;
-  }>;
-  circularReferences: string[];
-  totalDocuments: number;
-  validDocuments: number;
-}
 
 /**
  * Recursively validate an OpenAPI specification and all its references
  */
 export const validateRecursively = async (
-  source: string,
+  source: DocumentInput,
   options: ValidationOptions = {}
 ): Promise<RecursiveValidationResult> => {
   // Parse the root document
@@ -40,10 +30,10 @@ export const validateRecursively = async (
   );
 
   // Resolve all references
-  const { resolvedRefs, circularRefs } = await resolveAllReferences(
+  const { resolvedRefs, circularRefs, unresolvedRefs } = await resolveAllReferences(
     rootParsed.spec,
-    source,
-    options.maxRefDepth || 10
+    rootParsed.source,
+    options.maxRefDepth ?? 10
   );
 
   log.info(`🔗 Following ${resolvedRefs.length} references...`);
@@ -121,9 +111,18 @@ export const validateRecursively = async (
     allWarnings.push(...partial.result.warnings);
   }
 
+  for (const unresolved of unresolvedRefs) {
+    allErrors.push({
+      path: unresolved.path,
+      message: `Unresolved reference '${unresolved.value}': ${unresolved.message}`,
+    });
+  }
+
   const result = {
     valid:
-      rootValidation.valid && partialValidations.every((p) => p.result.valid),
+      rootValidation.valid &&
+      partialValidations.every((p) => p.result.valid) &&
+      unresolvedRefs.length === 0,
     errors: allErrors,
     warnings: allWarnings,
     spec: rootParsed.spec,
@@ -141,7 +140,7 @@ export const validateRecursively = async (
  * Validate multiple OpenAPI specifications recursively
  */
 export const validateMultipleRecursively = async (
-  sources: string[],
+  sources: DocumentInput[],
   options: ValidationOptions = {}
 ): Promise<RecursiveValidationResult[]> => {
   log.startOperation("Multiple recursive validation");
@@ -161,7 +160,7 @@ export const validateMultipleRecursively = async (
     log.updateProgress(i);
     log.fileOperation(
       "Processing specification",
-      source,
+      typeof source === "string" ? source : "input",
       `${i + 1}/${sources.length}`
     );
 
@@ -220,14 +219,14 @@ export const validateMultipleRecursively = async (
  * referenced from multiple places is NOT circular.
  */
 export const analyzeReferences = async (
-  source: string
+  source: DocumentInput
 ): Promise<{
   references: Array<{ path: string; value: string }>;
   circularReferences: string[];
   totalReferences: number;
 }> => {
   log.startOperation("Analyzing references");
-  log.fileOperation("Analyzing references", source);
+  log.fileOperation("Analyzing references", typeof source === "string" ? source : "input");
 
   const parsed = await parseOpenAPISpec(source);
   log.validationStep("Parsing completed for reference analysis");

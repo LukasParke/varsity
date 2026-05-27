@@ -7,6 +7,10 @@ export {
   validateWithReferences,
   validateMultipleWithReferences,
   analyzeDocumentReferences,
+  generateSpecificationSummary,
+  analyzeSpecification,
+  generateDetailedSummary,
+  generateJSONSummary,
   getSupportedVersions,
   createVarsity,
   // Individual module exports
@@ -50,6 +54,7 @@ export type {
   OpenAPIVersion,
   CLIResult,
   RecursiveValidationResult,
+  DocumentInput,
 } from "./src/types.js";
 
 // Export types from other modules
@@ -70,6 +75,8 @@ export type {
 } from "./src/partitioner.js";
 
 export type { SerializationFormat } from "./src/serializer.js";
+
+export type { SpecificationSummary } from "./src/summary-analyzer.js";
 
 // Default export - functional instance
 export { default } from "./src/varsity.js";

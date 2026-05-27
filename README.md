@@ -18,6 +18,8 @@ The package accepts JSON and YAML OpenAPI documents from local files or remote U
 
 ## Installation
 
+For library use inside a project:
+
 ```bash
 npm install varsity
 ```
@@ -29,6 +31,25 @@ yarn add varsity
 pnpm add varsity
 bun add varsity
 ```
+
+For the CLI on your `PATH`:
+
+```bash
+npm install -g varsity
+pnpm add -g varsity
+yarn global add varsity
+bun install -g varsity
+```
+
+For one-shot use without a global install:
+
+```bash
+npx varsity validate spec.yaml
+pnpm dlx varsity validate spec.yaml
+bunx varsity validate spec.yaml
+```
+
+The published CLI is a standard Node.js executable (`#!/usr/bin/env node`). Bun is supported as a package manager and development runtime, but Node.js must be available when running the installed CLI.
 
 ## CLI
 
@@ -58,8 +79,12 @@ varsity validate spec.yaml --strict --examples --references
 # Recursive validation that follows external file references
 varsity validate spec.json --recursive --max-depth 25
 
-# Machine-readable output for multi-spec validation
+# Machine-readable output
+varsity validate spec.yaml --json
 varsity validate spec-a.json spec-b.json --json
+
+# Validate a piped spec
+cat spec.yaml | varsity validate - --json
 ```
 
 Validation options:
@@ -69,8 +94,10 @@ Validation options:
 - `--references`: validate internal `#/...` references in the root document.
 - `--recursive`: validate the root document and referenced external documents.
 - `--max-depth <depth>`: maximum depth for recursive reference traversal.
-- `--json`: output JSON for batch validation.
+- `--json`: output stable machine-readable JSON for single or batch validation.
 - `--verbose`: print detailed validation progress.
+
+Validation exits with `0` when every input is valid and `1` when any input is invalid or cannot be parsed. JSON payloads and report contents are written to stdout; human diagnostics, warnings, and progress are written to stderr.
 
 ### Reports
 
@@ -240,7 +267,7 @@ const result = await varsity.validate("spec.json");
 
 ### Core Functions
 
-- `parse(source)`: parse a local or remote OpenAPI specification.
+- `parse(source)`: parse a local file, URL, stdin (`-`), raw content, or object OpenAPI specification.
 - `validate(source, options?, config?)`: validate one or more specifications.
 - `validateWithReferences(source, options?, config?)`: recursively validate a specification and referenced documents.
 - `validateMultipleWithReferences(sources, options?, config?)`: recursively validate multiple specifications.
@@ -259,7 +286,9 @@ interface ValidationOptions {
   validateReferences?: boolean;
   recursive?: boolean;
   maxRefDepth?: number;
-  customRules?: Record<string, unknown>;
+  customSchemas?: Record<string, JSONSchemaType<unknown>>;
+  strictSchema?: boolean;
+  silent?: boolean;
 }
 ```
 
@@ -300,7 +329,8 @@ interface WriteOptions {
 ### Requirements
 
 - Bun
-- Node.js 24 or newer for the built CLI and npm Trusted Publishing workflow
+- Node.js 20 or newer for the built CLI
+- Node.js 24 or newer for the npm Trusted Publishing workflow
 - TypeScript 5
 
 ### Local Workflow
@@ -314,6 +344,7 @@ npm pack --dry-run
 ```
 
 The build writes publishable JavaScript and declaration files to `dist/`.
+After building, smoke-test the published bin with `node dist/cli.js --version`, `node dist/cli.js info`, and `node dist/cli.js validate test/sample-openapi.json --json`.
 
 ## Publishing
 
@@ -339,7 +370,7 @@ Repository configuration alone is not enough to enable Trusted Publishing. The n
 
 Once npm Trusted Publishing is configured, no `NPM_TOKEN` repository secret is required for publishing.
 
-The publish workflow uses Node.js 24 so npm includes Trusted Publishing support. npm 11.5.1 or newer is required for the OIDC publish flow.
+The publish workflow uses Node.js 24 so npm includes Trusted Publishing support. npm 11.5.1 or newer is required for the OIDC publish flow. Runtime consumers only need Node.js 20 or newer.
 
 For provenance verification, `package.json` `repository.url` must point to the same GitHub repository as the workflow: `https://github.com/LukasParke/varsity`. npm may normalize that value to `git+https://github.com/LukasParke/varsity.git`; the owner and repository slug are the important parts.
 
