@@ -1,6 +1,6 @@
 {
 	"name": "varsity",
-	"version": "1.0.7",
+	"version": "1.0.8",
 	"description": "Comprehensive OpenAPI parsing and validation library",
 	"type": "module",
 	"main": "./dist/index.js",
